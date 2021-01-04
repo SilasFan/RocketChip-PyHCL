@@ -38,7 +38,7 @@ class TLBPageLookup:
     def groupRegions(managers: List[TLManagerParameters]) -> Dict[TLBFixedPermissions, List[AddressSet]]:
         permissions = map(
             lambda m: (m.address, TLBFixedPermissions(
-            e = m.regionType in vec(RegionType.PUT_EFFECTS, RegionType.GET_EFFECTS),
+            e = m.regionType in [RegionType.PUT_EFFECTS, RegionType.GET_EFFECTS],
             r = m.supportsGet     or m.supportsAcquireB, # if cached, never uses Get
             w = m.supportsPutFull or m.supportsAcquireT, # if cached, never uses Put
             x = m.executable,

@@ -1,15 +1,14 @@
+from __future__ import annotations
 import math
 from math import log2
 from functools import reduce
 from pyhcl import *
+from pyhcl.util import *
+from typing import List
 
 
-def log2Ceil(x):
-    return math.ceil(math.log(x, 2))
-
-
-def log2Up(x):
-    return max(log2Ceil(x), 1)
+def asUInt(x):
+    return CatBits(*[i for i in x])
 
 
 def flatten(l):
@@ -45,35 +44,6 @@ def get_from(l, v):
     return LookUpTable(v, m)
 
 
-def orRsize(x, size):
-    ret = U(0)
-    for i in range(size):
-        ret = ret | x[i]
-    return ret
-    
-
-def orR(x):
-    from pyhcl.core._repr import Index
-    from pyhcl.dsl.cdatatype import INT
-    from pyhcl.core._repr import Cat
-    if isinstance(x, Index):
-        ss = x.index
-        if isinstance(ss, slice):
-            size = ss.start - ss.stop + 1
-        else:
-            size = 1
-    elif issubclass(x.__class__, INT):
-        size = x.width
-    elif isinstance(x, list):
-        size = len(x)
-
-    return orRsize(x, size)
-
-
-def isPow2(x):
-    return not (x & (x-1))
-
-
 def partition(f, m):
     if isinstance(m, dict):
         yes = {}
@@ -104,27 +74,68 @@ def forall(f, l):
     return True
 
 
-def asTypeOf(x, t):
-    from pyhcl.dsl.cdatatype import INT
-    ret = t()
-    start = t.getWidth() - 1
-    for k, v in ret.__dict__.items():
-        if issubclass(v, INT):
-            ret.__dict__[k] = x[start: start+v.width]
-            start += v.width
-    return ret
-
-
 def vec(n, v):
+
     class ll(list):
         def map(self, f):
             return ll(map(f, self))
+        def filter(self, f):
+            return ll(filter(f, self))
+        def foreach(self, f):
+            for v in self:
+                f(v)
+            return self
+        @property
+        def min(self):
+            return min(self)
+        @property
+        def max(self):
+            return max(self)
         @property
         def asUInt(self):
             return CatBits(*self)
         @property
         def size(self):
             return len(self)
+        @property
+        def reverse(self):
+            new = ll(self)
+            new.reverse()
+            return new
+        @property
+        def distinct(self):
+            return ll(set(self))
+        def reduce(self, f):
+            return reduce(f, self)
+        def exists(self, f):
+            for v in self:
+                if f(v):
+                    return True
+            return False
+        def contains(self, v):
+            return v in self
+        def find(self, f):
+            for v in self:
+                if f(v):
+                    return v
+            return None
+        def foldLeft(self, v):
+            def helper(f):
+                ret = v
+                for item in self:
+                    ret = f(ret, item)
+                return ret
+            return helper
+        def scanLeft(self, v):
+            def helper(f):
+                ret = ll()
+                s = v
+                ret.append(s)
+                for item in self:
+                    s = f(s, item)
+                    ret.append(s)
+                return ret
+            return helper
 
     return ll([v for _ in range(n)])
 
@@ -137,28 +148,26 @@ def isOneOf(v, *args):
     return LookUpTable(v, m)
 
 
-def flip(m):
-    pass
-
-
-def Decoupled(m):
-    pass
-
-
-def DecoupledHelper(m):
-    pass
-
-
-def UIntToOH(i):
-    pass
-
-
-def OHToU(i):
-    pass
-
-
 class cls_or_insmethod(classmethod):
     def __get__(self, instance, type_):
         descr_get = super().__get__ if instance is None else self.__func__.__get__
         return descr_get(instance, type_)
 
+
+def asTypeOf(x, typ):
+    new = Wire(get_pyhcl_type(typ))
+    wx  = Wire(get_pyhcl_type(x))
+    start = typ.width - 1
+    for k, v in new.typ._kv.items():
+        attr = new.__getattribute__(k)
+        attr <<= wx[start: start-v.width]
+        start -= v.width
+    return new
+
+
+if __name__ == "__main__":
+    l = vec(10, 1)
+    for i in range(10):
+        l[i] = i
+    print(l.foldLeft(0)(lambda x, y: x+y))
+    print(l.scanLeft(0)(lambda x, y: x+y))

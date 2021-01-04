@@ -1,6 +1,5 @@
-class CoreBundle:
-    pass
+from pyhcl import *
 
 
-class CoreModule:
-    pass
+CoreBundle = Bundle
+CoreModule = Module

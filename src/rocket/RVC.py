@@ -1,23 +1,19 @@
 # See LICENSE.SiFive for license details.
 from dataclasses import dataclass
 from pyhcl import *
-from util.common import *
-
-"""
-usingCompressed = True
-XLen = 32
-
-class HasCoreParameters:
-    pass
+from helper.common import *
+from helper.test import *
 
 
-class Parameters:
-    pass
-"""
-
-class ExpandedInstruction():
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
+class ExpandedInstruction(Bundle):
+    def __init__(self):
+        Bundle.__init__(self,
+            bits = U.w(32),
+            rd =  U.w(5),
+            rs1 = U.w(5),
+            rs2 = U.w(5),
+            rs3 = U.w(5),
+        )
 
 
 def RVCDecoder(x: U, xLen: int):
@@ -46,16 +42,16 @@ def RVCDecoder(x: U, xLen: int):
     class clsRVCDecoder():
 
         def inst(self, bits, rd = x[11,7], rs1 = x[19,15], rs2 = x[24,20], rs3 = x[31,27]):
-            return ExpandedInstruction(
-                bits = bits,
-                rd = rd,
-                rs1 = rs1,
-                rs2 = rs2,
-                rs3 = rs3
-            )
+            res = Wire(ExpandedInstruction())
+            res.bits <<= bits
+            res.rd  <<= rd
+            res.rs1 <<= rs1
+            res.rs2 <<= rs2
+            res.rs3 <<= rs3
+            return res
 
         def q0(self):
-            addi4spn = self.inst(Cat(addi4spnImm, sp, U.w(3)(0), rs2p, Mux(orR(x[12:5]), U.w(7)(0x13), U.w(7)(0x1F))), rs2p, sp, rs2p)
+            addi4spn = self.inst(Cat(addi4spnImm, sp, U.w(3)(0), rs2p, Mux(x[12:5].orR, U.w(7)(0x13), U.w(7)(0x1F))), rs2p, sp, rs2p)
             ld = self.inst(Cat(ldImm, rs1p, U.w(3)(3), rs2p, U.w(7)(0x03)), rs2p, rs1p, rs2p)
             lw = self.inst(Cat(lwImm, rs1p, U.w(3)(2), rs2p, U.w(7)(0x03)), rs2p, rs1p, rs2p)
             fld = self.inst(Cat(ldImm, rs1p, U.w(3)(3), rs2p, U.w(7)(0x07)), rs2p, rs1p, rs2p)
@@ -69,22 +65,15 @@ def RVCDecoder(x: U, xLen: int):
 
         def q1(self):
             addi = self.inst(Cat(addiImm, rd, U.w(3)(0), rd, U.w(7)(0x13)), rd, rd, rs2p)
-            opc = Mux(orR(rd), U.w(7)(0x1B), U.w(7)(0x1F))
+            opc = Mux(rd.orR, U.w(7)(0x1B), U.w(7)(0x1F))
             addiw = self.inst(Cat(addiImm, rd, U.w(3)(0), rd, opc), rd, rd, rs2p)
             jal = self.inst(Cat(jImm[20], jImm[10:1], jImm[11], jImm[19:12], ra, U.w(7)(0x6F)), ra, rd, rs2p) if (xLen == 32) else addiw
             li = self.inst(Cat(addiImm, x0, U.w(3)(0), rd, U.w(7)(0x13)), rd, x0, rs2p)
-            opc = Mux(orRsize(addiImm, 12), U.w(7)(0x13), U.w(7)(0x1F))
+            opc = Mux(addiImm.orR, U.w(7)(0x13), U.w(7)(0x1F))
             addi16sp = self.inst(Cat(addi16spImm, rd, U.w(3)(0), rd, opc), rd, rd, rs2p)
-            opc = Mux(orRsize(addiImm, 12), U.w(7)(0x37), U.w(7)(0x3F))
+            opc = Mux(addiImm.orR, U.w(7)(0x37), U.w(7)(0x3F))
             me = self.inst(Cat(luiImm[31:12], rd, opc), rd, rd, rs2p)
-            lui = addi16sp
-            # with when (rd == x0):
-            #     lui = addi16sp
-            # with elsewhen (rd == x0):
-            #     lui = addi16sp
-            # with otherwise():
-            #     lui = me
-            # lui = Mux(rd == x0 or rd == sp, addi16sp, me)
+            lui = Mux(rd == x0 | rd == sp, addi16sp, me)
             j = self.inst(Cat(jImm[20], jImm[10:1], jImm[11], jImm[19:12], x0, U.w(7)(0x6F)), x0, rs1p, rs2p)
             beqz = self.inst(Cat(bImm[12], bImm[10:5], x0, rs1p, U.w(3)(0), bImm[4:1], bImm[11], U.w(7)(0x63)), rs1p, rs1p, x0)
             bnez = self.inst(Cat(bImm[12], bImm[10:5], x0, rs1p, U.w(3)(1), bImm[4:1], bImm[11], U.w(7)(0x63)), x0, rs1p, x0)
@@ -103,7 +92,7 @@ def RVCDecoder(x: U, xLen: int):
             return [addi, jal, li, lui, arith, j, beqz, bnez]
         
         def q2(self):
-            load_opc = Mux(orR(rd), U.w(7)(0x03), U.w(7)(0x1F))
+            load_opc = Mux(rd.orR, U.w(7)(0x03), U.w(7)(0x1F))
             slli = self.inst(Cat(shamt, rd, U.w(3)(1), rd, U.w(7)(0x13)), rd, rd, rs2)
             ldsp = self.inst(Cat(ldspImm, sp, U.w(3)(3), rd, load_opc), rd, sp, rs2)
             lwsp = self.inst(Cat(lwspImm, sp, U.w(3)(2), rd, load_opc), rd, sp, rs2)
@@ -119,28 +108,13 @@ def RVCDecoder(x: U, xLen: int):
                 add = self.inst(Cat(rs2, rd, U.w(3)(0), rd, U.w(7)(0x33)), rd, rd, rs2)
                 jr = Cat(rs2, rd, U.w(3)(0), x0, U.w(7)(0x67))
                 reserved = Cat(jr >> 7, U.w(7)(0x1F))
-                jr_reserved = self.inst(Mux(orR(rd), jr, reserved), x0, rd, rs2)
-                # with when (orR(rs2)): 
-                #     jr_mv = mv
-                # with otherwise(): 
-                #     jr_mv = jr_reserved
-                jr_mv = mv
-                # jr_mv = Mux(orR(rs2), mv, jr_reserved)
+                jr_reserved = self.inst(Mux(rd.orR, jr, reserved), x0, rd, rs2)
+                jr_mv = Mux(rs2.orR, mv, jr_reserved)
                 jalr = Cat(rs2, rd, U.w(3)(0), ra, U.w(7)(0x67))
                 ebreak = Cat(jr >> 7, U.w(7)(0x73)) | U(1 << 20)
-                jalr_ebreak = self.inst(Mux(orR(rd), jalr, ebreak), ra, rd, rs2)
-                # with when (orR(rs2)): 
-                #     jalr_add = add
-                # with otherwise(): 
-                #     jalr_add = jalr_ebreak
-                # jalr_add = Mux(orR(rs2), add, jalr_ebreak)
-                jalr_add = add
-                #with when (x[12]): 
-                #    ret = jalr_add
-                #with otherwise(): 
-                #    ret = jr_mv
-                #return ret
-                return jr_mv
+                jalr_ebreak = self.inst(Mux(rd.orR, jalr, ebreak), ra, rd, rs2)
+                jalr_add = Mux(rs2.orR, add, jalr_ebreak)
+                return Mux(x[12], jalr_add, jr_mv)
 
             jalr = jalr()
             return [slli, fldsp, lwsp, flwsp, jalr, fsdsp, swsp, fswsp]
@@ -153,8 +127,7 @@ def RVCDecoder(x: U, xLen: int):
 
         def decode(self):
             s = self.q0() + self.q1() + self.q2() + self.q3()
-            return s[1]
-            # return get_from(s, Cat(x[1:0], x[15:13]))
+            return get_from(s, Cat(x[1:0], x[15:13]))
 
     return clsRVCDecoder()
 
@@ -163,13 +136,7 @@ def RVCExpander(p: Parameters):
     class clsRVCExpander(Module, HasCoreParameters):
         io = IO(
             in0 = Input(U.w(32)),
-            out = Output(Bundle(
-                bits = U.w(32),
-                rd =  U.w(5),
-                rs1 = U.w(5),
-                rs2 = U.w(5),
-                rs3 = U.w(5),
-            )),
+            out = Output(ExpandedInstruction()),
             rvc = Output(Bool)
         )
 
@@ -195,4 +162,4 @@ def RVCExpander(p: Parameters):
 
 
 if __name__ == "__main__":
-    Emitter.dump(Emitter.emit(RVCExpander(1)), f"__file__.fir")
+    Emitter.dump(Emitter.emit(RVCExpander(1)), f"{__file__}.fir")

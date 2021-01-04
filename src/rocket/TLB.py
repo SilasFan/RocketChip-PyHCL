@@ -1,110 +1,104 @@
+from dataclasses import dataclass
 from tile.Core import CoreModule, CoreBundle
+from rocket.PTW import *
 from helper.common import *
+from helper.test import *
+from pyhcl import *
 
-
-ppnBits = 10
-asIdBits = 10
-vaddrBits = 32
-vaddrBitsExtended = 10
-pgLevels = 10
-usingVM = True
 
 
 class TLEdgeOut:
     pass
 
 
-class Parameters:
-    pass
-
-
 class SFenceReq(CoreBundle):
-    def __init__(self, p, **kwargs):
-        CoreBundle.__init__(self, p, **kwargs)
-        self.rs1 = Bool(True)
-        self.rs2 = Bool(True)
-        self.addr = U.w(vaddrBits)(0)
-        self.asid = U.w(max(1, asIdBits))(0)
+    def __init__(self):
+        CoreBundle.__init__(self,
+            rs1=Bool,
+            rs2=Bool,
+            addr=U.w(vaddrBits),
+            asid=U.w(max(1, asIdBits)),
+        )
+
 
 
 class TLBReq(CoreBundle):
-    def __init__(self, lgMaxSize, p, **kwargs):
-        CoreBundle.__init__(self, p, **kwargs)
-        self.vaddr = U.w(vaddrBitsExtended)(0)
-        self.passthrough = Bool(True)
-        self.size = U.w(log2Ceil(lgMaxSize + 1))(0)
-        self.cmd  = U.w(M_SZ)(0) # we have not bits
+    def __init__(self, lgMaxSize):
+        CoreBundle.__init__(self,
+            vaddr=U.w(vaddrBitsExtended),
+            passthrough=Bool,
+            size=U.w(log2Ceil(lgMaxSize + 1)),
+            cmd =U.w(M_SZ) # we have not bits,
+        )
         
 
 class TLBExceptions(Bundle):
-    def __init__(self, **kwargs):
-        Bundle.__init__(self, **kwargs)
-        self.ld = Bool()
-        self.st = Bool()
-        self.inst = Bool()
+    def __init__(self):
+        Bundle.__init__(self,
+            ld=Bool,
+            st=Bool,
+            inst=Bool,
+        )
 
 
 class TLBResp(CoreBundle):
-    def __init__(self, p, **kwargs):
-        CoreBundle.__init__(self, p, **kwargs)
-        self.miss = Bool()
-        self.paddr = U.w(paddrBits)
-        self.pf = TLBExceptions()
-        self.ae = TLBExceptions()
-        self.ma = TLBExceptions()
-        self.cacheable = Bool()
-        self.must_alloc = Bool()
-        self.prefetchable = Bool()
+    def __init__(self):
+        CoreBundle.__init__(self,
+            miss=Bool,
+            paddr=U.w(paddrBits),
+            pf=TLBExceptions(),
+            ae=TLBExceptions(),
+            ma=TLBExceptions(),
+            cacheable=Bool,
+            must_alloc=Bool,
+            prefetchable=Bool,
+        )
         
 
 class TLBEntryData(CoreBundle):
-    def __init__(self, p, **kwargs):
-        CoreBundle.__init__(self, p, **kwargs)
-        self.ppn = U.w(ppnBits)
-        self.u = Bool()
-        self.g = Bool()
-        self.ae = Bool()
-        self.sw = Bool()
-        self.sx = Bool()
-        self.sr = Bool()
-        self.pw = Bool()
-        self.px = Bool()
-        self.pr = Bool()
-        self.ppp = Bool() # PutPartial
-        self.pal = Bool() # AMO logical
-        self.paa = Bool() # AMO arithmetic
-        self.eff = Bool() # get/put effects
-        self.c = Bool()
-        self.fragmented_superpage = Bool()
-
-    @classmethod
-    def getWidth():
-        return 15 + ppnBits
+    def __init__(self):
+        CoreBundle.__init__(self,
+            ppn=U.w(ppnBits),
+            u=Bool,
+            g=Bool,
+            ae=Bool,
+            sw=Bool,
+            sx=Bool,
+            sr=Bool,
+            pw=Bool,
+            px=Bool,
+            pr=Bool,
+            ppp=Bool, # PutPartial
+            pal=Bool, # AMO logical
+            paa=Bool, # AMO arithmetic
+            eff=Bool, # get/put effects
+            c=Bool,
+            fragmented_superpage=Bool,
+        )
 
 
 class TLBEntry(CoreBundle):
 
-    def __init__(self, nSectors: int, superpage: bool, superpageOnly: bool, p: Parameters, **kwargs):
+    def __init__(self, nSectors: int, superpage: bool, superpageOnly: bool):
         assert nSectors == 1 or not superpage
         assert not superpageOnly or superpage
-
-        CoreBundle.__init__(self, p, **kwargs)
-
         self.nSectors = nSectors
         self.superpage = superpage
         self.superpageOnly = superpageOnly
 
-        self.level = U.w(log2Ceil(pgLevels))
-        self.tag = U.w(vpnBits)
-        self.data = vec(nSectors, U.w(TLBEntryData.getWidth()))
-        self.valid = vec(nSectors, Bool)
-        self.entry_data = map(lambda x: asTypeOf(x, TLBEntryData), self.data)
+        CoreBundle.__init__(self,
+            level=U.w(log2Ceil(pgLevels)),
+            tag=U.w(vpnBits),
+            data=Vec(nSectors, U.w(TLBEntryData().width)),
+            valid=Vec(nSectors, Bool),
+        )
+        self.entry_data=list(map(lambda x: asTypeOf(x, TLBEntryData()), self.data)),
 
     def sectorIdx(self, vpn: U):
         return vpn[log2(self.nSectors)-1: 0]
 
     def getData(self, vpn: U):
-        return OptimizationBarrier(get_from(self.data, self.sectorIdx(vpn)).asTypeOf(TLBEntryData)) # impl asTypeOf
+        return OptimizationBarrier(asTypeOf(self.data[self.sectorIdx(vpn)], TLBEntryData()))
 
     def sectorHit(self, vpn: U):
         return orR(self.valid) & self.sectorTagMatch(vpn)
@@ -135,41 +129,41 @@ class TLBEntry(CoreBundle):
 
     def insert(self, tag: U, level: U, entry: TLBEntryData):
         self.tag <<= tag
-        self.level <<= level[log2Ceil(pgLevels - self.superpageOnly.toInt)-1, 0]
+        self.level <<= level[log2Ceil(pgLevels - self.superpageOnly.toInt)-1: 0]
         idx = sectorIdx(tag)
-        self.valid[idx] <<= True
-        self.data[idx] <<= entry.asUInt
+        self.valid[idx] <<= Bool(True)
+        self.data[idx] <<= entry.asUInt # impl asUInt
 
     def invalidate(self):
         for i in range(len(self.valid)):
-            self.valid[i] <<= False
+            self.valid[i] <<= Bool(False)
 
     def invalidateVPN(self, vpn: U): 
         if self.superpage:
             with when (self.hit(vpn)): self.invalidate()
         else:
             with when (self.sectorTagMatch(vpn)):
-                self.valid[self.sectorIdx(vpn)] <<= False
+                self.valid[self.sectorIdx(vpn)] <<= Bool(False)
 
             # For fragmented self.superpage mappings, we assume the worst (largest)
             # case, and zap entries whose most-significant VPNs match
             with when (((self.tag ^ vpn) >> (pgLevelBits * (pgLevels - 1))) == 0):
                 for i in range(len(self.entry_data)):
                     with when(~self.entry_data[i].fragmented_superpage):
-                        self.valid[i] <<= False
+                        self.valid[i] <<= Bool(False)
 
     def invalidateNonGlobal(self):
         for i in range(len(self.entry_data)):
-            with when(not self.entry_data[i].g):
-                self.valid[i] <<= False
+            with when(~self.entry_data[i].g):
+                self.valid[i] <<= Bool(False)
 
 
+@dataclass
 class TLBConfig:
-    def __init__(self, nSets: int, nWays: int, nSectors: int = 4, nSuperpageEntries: int = 4):
-        self.nSets = nSets
-        self.nWays = nWays
-        self.nSectors = nSectors
-        self.nSuperpageEntries = nSuperpageEntries
+    nSets: int
+    nWays: int
+    nSectors: int = 4
+    nSuperpageEntries: int = 4
 
 
 # impl TLBPTWIO, TLEdgeOut, Parameters
@@ -179,19 +173,21 @@ def TLB(instruction: bool, lgMaxSize: int, cfg: TLBConfig, edge: TLEdgeOut, p: P
     class clsTLB(CoreModule):
         # use IO replace Bundle
         io = IO(
-            req=Decoupled(TLBReq(lgMaxSize)).flip, # ?
+            req=Input(Decoupled(TLBReq(lgMaxSize))),
             resp=Output(TLBResp()),
             sfence=Input(Valid(SFenceReq())),
-            ptw=TLBPTWIO,
-            kill=Bool(INPUT), # suppress a TLB refill, one cycle after a miss
+            ptw=Output(TLBPTWIO()),
+            kill=Input(Bool), # suppress a TLB refill, one cycle after a miss
         )
 
         pageGranularityPMPs = pmpGranularity >= (1 << pgIdxBits)
         vpn = io.req.bits.vaddr[vaddrBits-1: pgIdxBits]
         memIdx = vpn[log2(cfg.nSectors) + log2(cfg.nSets) - 1: log2(cfg.nSectors)]
-        sectored_entries = vec(cfg.nSets, vec(cfg.nWays / cfg.nSectors, RegInit(TLBEntry(cfg.nSectors, False, False))))
-        superpage_entries = vec(cfg.nSuperpageEntries, RegInit(TLBEntry(1, True, True)))
+        sectored_entries = RegInit(Vec(cfg.nSets, Vec(int(cfg.nWays / cfg.nSectors), TLBEntry(cfg.nSectors, False, False))))
+
+        superpage_entries = RegInit(Vec(cfg.nSuperpageEntries, TLBEntry(1, True, True)))
         special_entry = RegInit(TLBEntry(1, True, False)) if not pageGranularityPMPs else None
+
         ordinary_entries = sectored_entries[memIdx] + superpage_entries
         all_entries = ordinary_entries + [special_entry] if special_entry else []
         all_real_entries = sectored_entries.flatten + superpage_entries + [special_entry] if special_entry else []
@@ -285,7 +281,7 @@ def TLB(instruction: bool, lgMaxSize: int, cfg: TLBConfig, edge: TLEdgeOut, p: P
                 for i in range(len(superpage_entries)):
                     with when(r_superpage_repl_addr == i):
                         superpage_entries[i].insert(r_refill_tag, io.ptw.resp.bits.level, newEntry)
-                    with when(invalidate_refill): 
+                    with when(invalidate_refill):
                         superpage_entries[i].invalidate()
             with otherwise():
                 r_memIdx = r_refill_tag[log2(cfg.nSectors) + log2(cfg.nSets) - 1: log2(cfg.nSectors)]
@@ -451,6 +447,7 @@ def TLB(instruction: bool, lgMaxSize: int, cfg: TLBConfig, edge: TLEdgeOut, p: P
     return clsTLB()
     
 
-# if __name__ == "__main__":
-#     modname = __file__.split('.')[0]
-#     Emitter.dump(Emitter.emit(RVCExpander(1)), "{modname}.fir")
+if __name__ == "__main__":
+    cfg = TLBConfig(4, 4, 4, 4)
+    Emitter.dump(Emitter.emit(TLB(True, lgMaxSize, cfg, None, None)), "{__file__}.fir")
+    # e = TLBEntry(32, False, False)

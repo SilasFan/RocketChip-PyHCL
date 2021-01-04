@@ -21,6 +21,67 @@ class RegionType:
     GET_EFFECTS = 7 # gets produce side effects and so must not be issued speculatively
 
 
+# A non-empty half-open range; [start, end)
+class IdRange:
+# extends Ordered[IdRange]
+    def __init__(self, start: int, end: int):
+        self.start = start
+        self.end = end
+        assert start >= 0, f"Ids cannot be negative, but got: {start}."
+        assert start <= end, "Id ranges cannot be negative."
+
+    def compare(self, x: IdRange):
+        primary   = (self.start - x.start).signum
+        secondary = (x.end - self.end).signum
+        return primary if (primary != 0) else secondary
+
+    @cls_or_insmethod
+    def overlaps(self, x: Union[IdRange, List[IdRange]]):
+        if not isinstance(self, type):
+            return self.start < x.end and x.start < self.end
+        # a list 
+        s = x
+        if (s.isEmpty):
+            return None
+        else:
+            s.sort()
+        for a, b in range(zip(s[1:], s[:-1])):
+            if a.overlaps(b):
+                return (a, b)
+        return None
+
+    def contains(self, x: Union[U, int, IdRange]):
+        if isinstance(x, IdRange):
+            return self.start <= x.start and x.end <= self.end
+        if isinstance(x, int):
+            return self.start <= x and x < self.end
+        # U
+        if (self.size == 0):
+            return Bool(False)
+        elif (self.size == 1): # simple comparison
+            return x == U(self.start)
+        else:
+            # find index of largest different bit
+            largestDeltaBit = log2Floor(self.start ^ (self.end-1))
+            smallestCommonBit = largestDeltaBit + 1 # may not exist in x
+            uncommonMask = (1 << smallestCommonBit) - 1
+            uncommonBits = (x | U(0, width=smallestCommonBit))(largestDeltaBit, 0)
+            # the prefix must match exactly (note: may shift ALL bits away)
+            return ((x >> smallestCommonBit) == U(self.start >> smallestCommonBit) and
+            # firrtl constant prop range analysis can eliminate these two:
+            U(self.start & uncommonMask) <= uncommonBits and
+            uncommonBits <= U((self.end-1) & uncommonMask))
+
+    @property
+    def shift(self, x: int): return IdRange(self.start+x, self.end+x)
+    @property
+    def size(self): return self.end - self.start
+    @property
+    def isEmpty(self): return self.end == self.start
+    @property
+    def range(self): return [i for i in range(self.start, self.end)]
+
+
 # An potentially empty inclusive range of 2-powers [min, max] (in bytes)
 class TransferSizes():
 
